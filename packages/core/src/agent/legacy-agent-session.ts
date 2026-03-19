@@ -253,7 +253,8 @@ export class LegacyAgentSession implements AgentSession {
           // Terminal events — translator already emitted stream_end
           if (
             event.type === GeminiEventType.AgentExecutionStopped ||
-            event.type === GeminiEventType.UserCancelled
+            event.type === GeminiEventType.UserCancelled ||
+            event.type === GeminiEventType.MaxSessionTurns
           ) {
             this._markStreamDone();
             return;

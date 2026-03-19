@@ -532,17 +532,13 @@ describe('LegacyAgentSession', () => {
       expect(sendMock).not.toHaveBeenCalled();
     });
 
-    it('treats GeminiClient MaxSessionTurns as a non-terminal warning event', async () => {
+    it('treats GeminiClient MaxSessionTurns as a terminal max_turns stream end', async () => {
       const sendMock = deps.client.sendMessageStream as ReturnType<
         typeof vi.fn
       >;
       sendMock.mockReturnValue(
         makeStream([
           { type: GeminiEventType.MaxSessionTurns },
-          {
-            type: GeminiEventType.Finished,
-            value: { reason: FinishReason.STOP, usageMetadata: undefined },
-          },
         ]),
       );
 
@@ -550,17 +546,18 @@ describe('LegacyAgentSession', () => {
       await session.send({ message: [{ type: 'text', text: 'hi' }] });
       const events = await collectEvents(session);
 
-      const warning = events.find(
-        (e): e is AgentEvent<'error'> =>
-          e.type === 'error' && e._meta?.['code'] === 'MAX_TURNS_EXCEEDED',
+      const errorEvents = events.filter(
+        (e): e is AgentEvent<'error'> => e.type === 'error',
       );
-      expect(warning?.fatal).toBe(false);
+      expect(errorEvents).toHaveLength(0);
 
-      const streamEnds = events.filter(
+      const streamEnd = events.findLast(
         (e): e is AgentEvent<'stream_end'> => e.type === 'stream_end',
       );
-      const streamEnd = streamEnds[streamEnds.length - 1];
-      expect(streamEnd?.reason).toBe('completed');
+      expect(streamEnd?.reason).toBe('max_turns');
+      expect(streamEnd?.data).toEqual({
+        code: 'MAX_TURNS_EXCEEDED',
+      });
     });
   });
 
