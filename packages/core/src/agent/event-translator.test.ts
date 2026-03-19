@@ -423,7 +423,7 @@ describe('translateEvent', () => {
   });
 
   describe('Finished events', () => {
-    it('emits usage + stream_end for STOP', () => {
+    it('emits usage for STOP', () => {
       state.streamStartEmitted = true;
       state.model = 'gemini-2.5-pro';
       const event: ServerGeminiStreamEvent = {
@@ -438,27 +438,23 @@ describe('translateEvent', () => {
         },
       };
       const result = translateEvent(event, state);
-      expect(result).toHaveLength(2);
+      expect(result).toHaveLength(1);
 
       const usage = result[0] as AgentEvent<'usage'>;
       expect(usage.model).toBe('gemini-2.5-pro');
       expect(usage.inputTokens).toBe(100);
       expect(usage.outputTokens).toBe(50);
       expect(usage.cachedTokens).toBe(10);
-
-      const end = result[1] as AgentEvent<'stream_end'>;
-      expect(end.reason).toBe('completed');
     });
 
-    it('emits stream_end without usage when no metadata', () => {
+    it('emits nothing when no usage metadata is present', () => {
       state.streamStartEmitted = true;
       const event: ServerGeminiStreamEvent = {
         type: GeminiEventType.Finished,
         value: { reason: undefined, usageMetadata: undefined },
       };
       const result = translateEvent(event, state);
-      expect(result).toHaveLength(1);
-      expect(result[0]?.type).toBe('stream_end');
+      expect(result).toHaveLength(0);
     });
   });
 

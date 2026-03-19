@@ -8,18 +8,25 @@ export type WithMeta = { _meta?: Record<string, unknown> };
 
 export interface AgentSession extends Trajectory {
   /**
-   * Send data to the agent. Promise resolves when action is acknowledged.
-   * Returns the `streamId` of the stream the message was correlated to -- this may
-   * be a new stream if idle or an existing stream.
+   * Send data to the agent. Starts a new stream and resolves once the send is
+   * acknowledged.
+   *
+   * Sessions may be reused across multiple sequential sends, but only one
+   * stream may be active at a time. Implementations should throw if `send()` is
+   * called while a previous stream is still active.
+   *
+   * Returns the `streamId` of the newly started stream.
    */
   send(payload: AgentSend): Promise<{ streamId: string }>;
   /**
    * Begin listening to actively streaming data. Stream must have the following
    * properties:
    *
-   * - If no arguments are provided, streams events from an active stream.
+   * - If no arguments are provided, streams events from the active stream.
+   *   If no stream is active, waits for the next stream to begin.
    * - If a {streamId} is provided, streams ALL events from that stream.
-   * - If an {eventId} is provided, streams all events AFTER that event.
+   * - If an {eventId} is provided, streams all events AFTER that event within
+   *   the same stream as that event.
    */
   stream(options?: {
     streamId?: string;

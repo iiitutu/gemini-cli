@@ -285,18 +285,11 @@ function handleFinished(
   state: TranslationState,
   out: AgentEvent[],
 ): void {
-  ensureStreamStart(state, out);
-
   if (value.usageMetadata) {
+    ensureStreamStart(state, out);
     const usage = mapUsage(value.usageMetadata, state.model);
     out.push(makeEvent('usage', state, usage));
   }
-
-  out.push(
-    makeEvent('stream_end', state, {
-      reason: mapFinishReason(value.reason),
-    }),
-  );
 }
 
 // ---------------------------------------------------------------------------
