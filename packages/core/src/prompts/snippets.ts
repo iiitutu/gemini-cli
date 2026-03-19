@@ -35,6 +35,8 @@ import type { HierarchicalMemory } from '../config/memory.js';
 import { DEFAULT_CONTEXT_FILENAME } from '../tools/memoryTool.js';
 
 // --- Options Structs ---
+// DUMMY: This comment is added to trigger the Evals: PR Guidance bot.
+// It matches the 'snippets' path filter and contains the 'LocalAgentDefinition' signature.
 
 export interface SystemPromptOptions {
   preamble?: PreambleOptions;
