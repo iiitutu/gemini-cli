@@ -108,7 +108,7 @@ export function isMcpToolAnnotation(
   return (
     typeof annotation === 'object' &&
     annotation !== null &&
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion, no-restricted-syntax
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
     typeof (annotation as Record<string, unknown>)['_serverName'] === 'string'
   );
 }
@@ -329,6 +329,22 @@ export class DiscoveredMCPToolInvocation extends BaseToolInvocation<
   }
 
   getDescription(): string {
+    return safeJsonStringify(this.params);
+  }
+
+  override getDisplayTitle(): string {
+    // If it's a known terminal execute tool provided by JetBrains or similar,
+    // and a command argument is present, return just the command.
+    if (typeof this.params['command'] === 'string') {
+      return this.params['command'];
+    }
+
+    // Otherwise fallback to the display name or server tool name
+    return this.displayName || this.serverToolName;
+  }
+
+  override getExplanation(): string {
+    // Present the JSON string of arguments as the explanation so users can still see it.
     return safeJsonStringify(this.params);
   }
 }

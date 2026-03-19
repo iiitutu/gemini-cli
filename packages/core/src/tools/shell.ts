@@ -91,6 +91,26 @@ export class ShellToolInvocation extends BaseToolInvocation<
     return description;
   }
 
+  override getDisplayTitle(): string {
+    return this.params.command;
+  }
+
+  override getExplanation(): string {
+    let explanation = '';
+    if (this.params.dir_path) {
+      explanation += `[in ${this.params.dir_path}]`;
+    } else {
+      explanation += `[current working directory ${process.cwd()}]`;
+    }
+    if (this.params.description) {
+      explanation += ` (${this.params.description.replace(/\n/g, ' ')})`;
+    }
+    if (this.params.is_background) {
+      explanation += ' [background]';
+    }
+    return explanation.trim();
+  }
+
   override getPolicyUpdateOptions(
     outcome: ToolConfirmationOutcome,
   ): PolicyUpdateOptions | undefined {

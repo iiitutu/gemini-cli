@@ -165,6 +165,24 @@ describe('DiscoveredMCPTool', () => {
     });
   });
 
+  describe('getDisplayTitle and getExplanation', () => {
+    it('should return command as title if it exists', () => {
+      const invocation = tool.build({ command: 'ls -la' });
+      expect(invocation.getDisplayTitle?.()).toBe('ls -la');
+    });
+
+    it('should return serverToolName if command does not exist', () => {
+      const invocation = tool.build({ param: 'testValue' });
+      expect(invocation.getDisplayTitle?.()).toBe(tool.serverToolName);
+    });
+
+    it('should return stringified json for getExplanation', () => {
+      const params = { command: 'ls -la', path: '/' };
+      const invocation = tool.build(params);
+      expect(invocation.getExplanation?.()).toBe(safeJsonStringify(params));
+    });
+  });
+
   describe('execute', () => {
     it('should call mcpTool.callTool with correct parameters and format display output', async () => {
       const params = { param: 'testValue' };

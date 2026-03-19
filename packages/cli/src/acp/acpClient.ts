@@ -969,6 +969,17 @@ export class Session {
           });
         }
 
+        const explanation =
+          typeof invocation.getExplanation === 'function'
+            ? invocation.getExplanation()
+            : '';
+        if (explanation) {
+          await this.sendUpdate({
+            sessionUpdate: 'agent_thought_chunk',
+            content: { type: 'text', text: explanation },
+          });
+        }
+
         const params: acp.RequestPermissionRequest = {
           sessionId: this.id,
           options: toPermissionOptions(
@@ -978,7 +989,10 @@ export class Session {
           toolCall: {
             toolCallId: callId,
             status: 'pending',
-            title: invocation.getDescription(),
+            title:
+              typeof invocation.getDisplayTitle === 'function'
+                ? invocation.getDisplayTitle()
+                : invocation.getDescription(),
             content,
             locations: invocation.toolLocations(),
             kind: toAcpToolKind(tool.kind),
@@ -1014,12 +1028,29 @@ export class Session {
           }
         }
       } else {
+        const explanation =
+          typeof invocation.getExplanation === 'function'
+            ? invocation.getExplanation()
+            : '';
+
+        if (explanation) {
+          await this.sendUpdate({
+            sessionUpdate: 'agent_thought_chunk',
+            content: { type: 'text', text: explanation },
+          });
+        }
+
+        const content: acp.ToolCallContent[] = [];
+
         await this.sendUpdate({
           sessionUpdate: 'tool_call',
           toolCallId: callId,
           status: 'in_progress',
-          title: invocation.getDescription(),
-          content: [],
+          title:
+            typeof invocation.getDisplayTitle === 'function'
+              ? invocation.getDisplayTitle()
+              : invocation.getDescription(),
+          content,
           locations: invocation.toolLocations(),
           kind: toAcpToolKind(tool.kind),
         });
@@ -1028,12 +1059,20 @@ export class Session {
       const toolResult: ToolResult = await invocation.execute(abortSignal);
       const content = toToolCallContent(toolResult);
 
+      const updateContent: acp.ToolCallContent[] = [];
+      if (content) {
+        updateContent.push(content);
+      }
+
       await this.sendUpdate({
         sessionUpdate: 'tool_call_update',
         toolCallId: callId,
         status: 'completed',
-        title: invocation.getDescription(),
-        content: content ? [content] : [],
+        title:
+          typeof invocation.getDisplayTitle === 'function'
+            ? invocation.getDisplayTitle()
+            : invocation.getDescription(),
+        content: updateContent,
         locations: invocation.toolLocations(),
         kind: toAcpToolKind(tool.kind),
       });
