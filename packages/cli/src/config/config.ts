@@ -115,7 +115,7 @@ const coerceCommaSeparated = (values: string[]): string[] => {
 };
 
 export async function parseArguments(
-  settings: MergedSettings,
+  _settings: MergedSettings,
 ): Promise<CliArgs> {
   const rawArgv = hideBin(process.argv);
   const startupMessages: string[] = [];
@@ -125,17 +125,71 @@ export async function parseArguments(
     .usage(
       'Usage: gemini [options] [command]\n\nGemini CLI - Defaults to interactive mode. Use -p/--prompt for non-interactive (headless) mode.',
     )
-  if (settings.experimental?.extensionManagement) {
-    yargsInstance.command(extensionsCommand);
-  }
+    .option('isCommand', {
+      type: 'boolean',
+      hidden: true,
+      description: 'Internal flag to indicate if a subcommand is being run',
+    })
+    .option('debug', {
+      alias: 'd',
+      type: 'boolean',
+      description: 'Run in debug mode (open debug console with F12)',
+      default: false,
+    })
+    .middleware((argv) => {
+      const subcommands = [
+        'mcp',
+        'extensions',
+        'extension',
+        'skills',
+        'skill',
+        'hooks',
+        'hook',
+      ];
+      const firstArg = argv._[0];
+      if (typeof firstArg === 'string' && subcommands.includes(firstArg)) {
+        argv['isCommand'] = true;
+      }
+    }, true)
+    // Ensure validation flows through .fail() for clean UX
+    .fail((msg, err) => {
+      if (err) throw err;
+      throw new Error(msg);
+    })
+    .check((argv) => {
+      // The 'query' positional can be a string (for one arg) or string[] (for multiple).
+      // This guard safely checks if any positional argument was provided.
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+      const query = argv['query'] as string | string[] | undefined;
+      const hasPositionalQuery = Array.isArray(query)
+        ? query.length > 0
+        : !!query;
 
-  if (settings.skills?.enabled ?? true) {
-    yargsInstance.command(skillsCommand);
-  }
-  // Register hooks command if hooks are enabled
-  if (settings.hooksConfig.enabled) {
-    yargsInstance.command(hooksCommand);
-  }
+      if (argv['prompt'] && hasPositionalQuery) {
+        return 'Cannot use both a positional prompt and the --prompt (-p) flag together';
+      }
+      if (argv['prompt'] && argv['promptInteractive']) {
+        return 'Cannot use both --prompt (-p) and --prompt-interactive (-i) together';
+      }
+      if (argv['yolo'] && argv['approvalMode']) {
+        return 'Cannot use both --yolo (-y) and --approval-mode together. Use --approval-mode=yolo instead.';
+      }
+      if (
+        argv['outputFormat'] &&
+        !['text', 'json', 'stream-json'].includes(
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+          argv['outputFormat'] as string,
+        )
+      ) {
+        return `Invalid values:\n  Argument: output-format, Given: "${argv['outputFormat']}", Choices: "text", "json", "stream-json"`;
+      }
+      return true;
+    });
+
+  yargsInstance.command(mcpCommand);
+  yargsInstance.command(extensionsCommand);
+  yargsInstance.command(skillsCommand);
+  yargsInstance.command(hooksCommand);
 
   yargsInstance
     .command('$0 [query..]', 'Launch Gemini CLI', (yargsInstance) =>
