@@ -4,51 +4,39 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   type SandboxManager,
+  type GlobalSandboxOptions,
   type SandboxRequest,
   type SandboxedCommand,
+  type ExecutionPolicy,
 } from '../../services/sandboxManager.js';
 import {
   sanitizeEnvironment,
   getSecureSanitizationConfig,
-  type EnvironmentSanitizationConfig,
 } from '../../services/environmentSanitization.js';
-import { buildSeatbeltArgs } from './seatbeltArgsBuilder.js';
-
-/**
- * Options for configuring the MacOsSandboxManager.
- */
-export interface MacOsSandboxOptions {
-  /** The primary workspace path to allow access to within the sandbox. */
-  workspace: string;
-  /** Additional paths to allow access to within the sandbox. */
-  allowedPaths?: string[];
-  /** Whether network access is allowed. */
-  networkAccess?: boolean;
-  /** Optional base sanitization config. */
-  sanitizationConfig?: EnvironmentSanitizationConfig;
-}
+import {
+  BASE_SEATBELT_PROFILE,
+  NETWORK_SEATBELT_PROFILE,
+} from './baseProfile.js';
 
 /**
  * A SandboxManager implementation for macOS that uses Seatbelt.
  */
 export class MacOsSandboxManager implements SandboxManager {
-  constructor(private readonly options: MacOsSandboxOptions) {}
+  constructor(private readonly options: GlobalSandboxOptions) {}
 
   async prepareCommand(req: SandboxRequest): Promise<SandboxedCommand> {
     const sanitizationConfig = getSecureSanitizationConfig(
-      req.config?.sanitizationConfig,
-      this.options.sanitizationConfig,
+      req.policy?.sanitizationConfig,
     );
 
     const sanitizedEnv = sanitizeEnvironment(req.env, sanitizationConfig);
 
-    const sandboxArgs = buildSeatbeltArgs({
-      workspace: this.options.workspace,
-      allowedPaths: this.options.allowedPaths,
-      networkAccess: this.options.networkAccess,
-    });
+    const sandboxArgs = this.buildSeatbeltArgs(this.options, req.policy);
 
     return {
       program: '/usr/bin/sandbox-exec',
@@ -56,5 +44,63 @@ export class MacOsSandboxManager implements SandboxManager {
       env: sanitizedEnv,
       cwd: req.cwd,
     };
+  }
+
+  /**
+   * Builds the arguments array for sandbox-exec using a strict allowlist profile.
+   * It relies on parameters passed to sandbox-exec via the -D flag to avoid
+   * string interpolation vulnerabilities, and normalizes paths against symlink escapes.
+   *
+   * Returns arguments up to the end of sandbox-exec configuration (e.g. ['-p', '<profile>', '-D', ...])
+   * Does not include the final '--' separator or the command to run.
+   */
+  private buildSeatbeltArgs(
+    options: GlobalSandboxOptions,
+    policy?: ExecutionPolicy,
+  ): string[] {
+    let profile = BASE_SEATBELT_PROFILE + '\n';
+    const args: string[] = [];
+
+    const workspacePath = this.tryRealpath(options.workspace);
+    args.push('-D', `WORKSPACE=${workspacePath}`);
+
+    const tmpPath = this.tryRealpath(os.tmpdir());
+    args.push('-D', `TMPDIR=${tmpPath}`);
+
+    if (policy?.allowedPaths) {
+      for (let i = 0; i < policy.allowedPaths.length; i++) {
+        const allowedPath = this.tryRealpath(policy.allowedPaths[i]);
+        args.push('-D', `ALLOWED_PATH_${i}=${allowedPath}`);
+        profile += `(allow file-read* file-write* (subpath (param "ALLOWED_PATH_${i}")))\n`;
+      }
+    }
+
+    if (policy?.networkAccess) {
+      profile += NETWORK_SEATBELT_PROFILE;
+    }
+
+    args.unshift('-p', profile);
+
+    return args;
+  }
+
+  /**
+   * Resolves symlinks for a given path to prevent sandbox escapes.
+   * If a file does not exist (ENOENT), it recursively resolves the parent directory.
+   * Other errors (e.g. EACCES) are re-thrown.
+   */
+  private tryRealpath(p: string): string {
+    try {
+      return fs.realpathSync(p);
+    } catch (e) {
+      if (e instanceof Error && 'code' in e && e.code === 'ENOENT') {
+        const parentDir = path.dirname(p);
+        if (parentDir === p) {
+          return p;
+        }
+        return path.join(this.tryRealpath(parentDir), path.basename(p));
+      }
+      throw e;
+    }
   }
 }

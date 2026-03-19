@@ -14,6 +14,28 @@ import { LinuxSandboxManager } from '../sandbox/linux/LinuxSandboxManager.js';
 import { MacOsSandboxManager } from '../sandbox/macos/MacOsSandboxManager.js';
 
 /**
+ * Security boundaries and permissions applied to a specific sandboxed execution.
+ */
+export interface ExecutionPolicy {
+  /** Additional paths to allow access to within the sandbox. */
+  allowedPaths?: string[];
+  /** Absolute paths to explicitly deny (takes precedence over allowlists). */
+  forbiddenPaths?: string[];
+  /** Whether network access is allowed. */
+  networkAccess?: boolean;
+  /** Rules for scrubbing sensitive environment variables. */
+  sanitizationConfig?: Partial<EnvironmentSanitizationConfig>;
+}
+
+/**
+ * Global configuration options used to initialize a SandboxManager.
+ */
+export interface GlobalSandboxOptions {
+  /** The primary workspace path the sandbox is anchored to. */
+  workspace: string;
+}
+
+/**
  * Request for preparing a command to run in a sandbox.
  */
 export interface SandboxRequest {
@@ -25,10 +47,8 @@ export interface SandboxRequest {
   cwd: string;
   /** Environment variables to be passed to the program. */
   env: NodeJS.ProcessEnv;
-  /** Optional sandbox-specific configuration. */
-  config?: {
-    sanitizationConfig?: Partial<EnvironmentSanitizationConfig>;
-  };
+  /** Policy to use for this request. */
+  policy?: ExecutionPolicy;
 }
 
 /**
@@ -66,7 +86,7 @@ export class NoopSandboxManager implements SandboxManager {
    */
   async prepareCommand(req: SandboxRequest): Promise<SandboxedCommand> {
     const sanitizationConfig = getSecureSanitizationConfig(
-      req.config?.sanitizationConfig,
+      req.policy?.sanitizationConfig,
     );
 
     const sanitizedEnv = sanitizeEnvironment(req.env, sanitizationConfig);

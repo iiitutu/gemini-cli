@@ -351,7 +351,7 @@ export class ShellExecutionService {
       args,
       cwd,
       env,
-      config: {
+      policy: {
         sanitizationConfig:
           sanitizationConfigOverride ?? shellExecutionConfig.sanitizationConfig,
       },

@@ -9,13 +9,13 @@ import { writeFileSync } from 'node:fs';
 import os from 'node:os';
 import {
   type SandboxManager,
+  type GlobalSandboxOptions,
   type SandboxRequest,
   type SandboxedCommand,
 } from '../../services/sandboxManager.js';
 import {
   sanitizeEnvironment,
   getSecureSanitizationConfig,
-  type EnvironmentSanitizationConfig,
 } from '../../services/environmentSanitization.js';
 
 let cachedBpfPath: string | undefined;
@@ -77,27 +77,14 @@ function getSeccompBpfPath(): string {
 }
 
 /**
- * Options for configuring the LinuxSandboxManager.
- */
-export interface LinuxSandboxOptions {
-  /** The primary workspace path to bind into the sandbox. */
-  workspace: string;
-  /** Additional paths to bind into the sandbox. */
-  allowedPaths?: string[];
-  /** Optional base sanitization config. */
-  sanitizationConfig?: EnvironmentSanitizationConfig;
-}
-
-/**
  * A SandboxManager implementation for Linux that uses Bubblewrap (bwrap).
  */
 export class LinuxSandboxManager implements SandboxManager {
-  constructor(private readonly options: LinuxSandboxOptions) {}
+  constructor(private readonly options: GlobalSandboxOptions) {}
 
   async prepareCommand(req: SandboxRequest): Promise<SandboxedCommand> {
     const sanitizationConfig = getSecureSanitizationConfig(
-      req.config?.sanitizationConfig,
-      this.options.sanitizationConfig,
+      req.policy?.sanitizationConfig,
     );
 
     const sanitizedEnv = sanitizeEnvironment(req.env, sanitizationConfig);
@@ -121,7 +108,7 @@ export class LinuxSandboxManager implements SandboxManager {
       this.options.workspace,
     ];
 
-    const allowedPaths = this.options.allowedPaths ?? [];
+    const allowedPaths = req.policy?.allowedPaths ?? [];
     for (const path of allowedPaths) {
       if (path !== this.options.workspace) {
         bwrapArgs.push('--bind', path, path);

@@ -60,7 +60,7 @@ describe('NoopSandboxManager', () => {
       env: {
         API_KEY: 'sensitive-key',
       },
-      config: {
+      policy: {
         sanitizationConfig: {
           enableEnvironmentVariableRedaction: false,
         },
@@ -82,7 +82,7 @@ describe('NoopSandboxManager', () => {
         MY_SAFE_VAR: 'safe-value',
         MY_TOKEN: 'secret-token',
       },
-      config: {
+      policy: {
         sanitizationConfig: {
           allowedEnvironmentVariables: ['MY_SAFE_VAR', 'MY_TOKEN'],
         },
@@ -105,7 +105,7 @@ describe('NoopSandboxManager', () => {
         SAFE_VAR: 'safe-value',
         BLOCKED_VAR: 'blocked-value',
       },
-      config: {
+      policy: {
         sanitizationConfig: {
           blockedEnvironmentVariables: ['BLOCKED_VAR'],
         },
