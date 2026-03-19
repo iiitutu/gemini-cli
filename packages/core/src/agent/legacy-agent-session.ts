@@ -20,6 +20,7 @@ import { debugLogger } from '../utils/debugLogger.js';
 import {
   translateEvent,
   createTranslationState,
+  mapFinishReason,
   type TranslationState,
 } from './event-translator.js';
 import {
@@ -52,8 +53,9 @@ export class LegacyAgentSession implements AgentSession {
   private _events: AgentEvent[] = [];
   private _translationState: TranslationState;
   private _subscribers: Set<() => void> = new Set();
-  private _streamDone: boolean = false;
   private _streamEndEmitted: boolean = false;
+  private _activeStreamId?: string;
+  private _lastStartedStreamId?: string;
   private _abortController: AbortController = new AbortController();
 
   private readonly _client: GeminiClient;
@@ -79,6 +81,22 @@ export class LegacyAgentSession implements AgentSession {
       throw new Error('LegacyAgentSession.send() only supports message sends.');
     }
 
+    if (this._activeStreamId) {
+      throw new Error(
+        'LegacyAgentSession.send() cannot be called while a stream is active.',
+      );
+    }
+
+    this._beginNewStream();
+    this._ensureStreamStart();
+    this._appendAndNotify([
+      this._makeInternalEvent('message', {
+        role: 'user',
+        content: message,
+        ...(payload._meta ? { _meta: payload._meta } : {}),
+      }),
+    ]);
+
     const parts = contentPartsToGeminiParts(message);
 
     // Start the loop in the background — don't await
@@ -98,58 +116,44 @@ export class LegacyAgentSession implements AgentSession {
     streamId?: string;
     eventId?: string;
   }): AsyncIterableIterator<AgentEvent> {
+    let streamId = options?.streamId;
     let startIndex = 0;
 
     if (options?.eventId) {
       const idx = this._events.findIndex((e) => e.id === options.eventId);
-      if (idx !== -1) {
-        startIndex = idx + 1;
+      if (idx === -1) {
+        throw new Error(`Event not found: ${options.eventId}`);
       }
+
+      const event = this._events[idx];
+      streamId = streamId ?? event?.streamId;
+      if (!streamId) {
+        throw new Error(`Event not associated with a stream: ${options.eventId}`);
+      }
+      if (options.streamId && event?.streamId && event.streamId !== options.streamId) {
+        throw new Error(
+          `Event ${options.eventId} does not belong to stream ${options.streamId}`,
+        );
+      }
+      startIndex = idx + 1;
     }
 
-    // Replay existing events
-    for (let i = startIndex; i < this._events.length; i++) {
-      const event = this._events[i];
-      if (event) {
-        yield event;
-        if (event.type === 'stream_end') return;
-      }
+    if (streamId) {
+      yield* this._streamById(streamId, startIndex);
+      return;
     }
 
-    if (this._streamDone) return;
-
-    // Live-follow new events. Drain any buffered events after each wake-up,
-    // even if _streamDone was set between the notification and resumption.
-    let replayedUpTo = this._events.length;
-    while (true) {
-      // Wait for new events or stream completion
-      if (replayedUpTo >= this._events.length && !this._streamDone) {
-        await new Promise<void>((resolve) => {
-          if (this._events.length > replayedUpTo || this._streamDone) {
-            resolve();
-            return;
-          }
-          const handler = (): void => {
-            this._subscribers.delete(handler);
-            resolve();
-          };
-          this._subscribers.add(handler);
-        });
-      }
-
-      // Always drain buffered events before checking _streamDone
-      while (replayedUpTo < this._events.length) {
-        const event = this._events[replayedUpTo];
-        replayedUpTo++;
-        if (event) {
-          yield event;
-          if (event.type === 'stream_end') return;
-        }
-      }
-
-      // Exit only after draining
-      if (this._streamDone) return;
+    const lastSeenStreamId = this._lastStartedStreamId;
+    while (!this._activeStreamId && this._lastStartedStreamId === lastSeenStreamId) {
+      await this._waitForUpdate();
     }
+
+    const targetStreamId = this._activeStreamId ?? this._lastStartedStreamId;
+    if (!targetStreamId) {
+      return;
+    }
+
+    yield* this._streamById(targetStreamId, 0);
   }
 
   async abort(): Promise<void> {
@@ -211,27 +215,15 @@ export class LegacyAgentSession implements AgentSession {
             return;
           }
 
-          // Collect tool call requests BEFORE translating so we can
-          // decide whether to suppress the Finished event's stream_end.
+          // Collect tool call requests BEFORE translating so we can decide
+          // whether this turn is terminal after a Finished event.
           if (event.type === GeminiEventType.ToolCallRequest) {
             toolCallRequests.push(event.value);
           }
 
           // Translate to AgentEvents
           const agentEvents = translateEvent(event, this._translationState);
-
-          // Finished events don't mean the session is done — if there are
-          // pending tool calls, more turns are coming. Suppress stream_end
-          // from the Finished event in that case (keep usage events).
-          if (
-            event.type === GeminiEventType.Finished &&
-            toolCallRequests.length > 0
-          ) {
-            const filtered = agentEvents.filter((e) => e.type !== 'stream_end');
-            this._appendAndNotify(filtered);
-          } else {
-            this._appendAndNotify(agentEvents);
-          }
+          this._appendAndNotify(agentEvents);
 
           // Error events → abort the loop
           if (event.type === GeminiEventType.Error) {
@@ -248,6 +240,16 @@ export class LegacyAgentSession implements AgentSession {
             this._ensureStreamEnd('failed');
             this._markStreamDone();
             return;
+          }
+
+          if (event.type === GeminiEventType.Finished) {
+            if (toolCallRequests.length === 0) {
+              this._ensureStreamEnd(mapFinishReason(event.value.reason));
+              this._markStreamDone();
+              return;
+            }
+
+            continue;
           }
 
           // Terminal events — translator already emitted stream_end
@@ -363,10 +365,20 @@ export class LegacyAgentSession implements AgentSession {
   // Internal helpers
   // ---------------------------------------------------------------------------
 
-  /** Sets _streamDone and notifies subscribers so the stream iterator can exit. */
+  /** Marks the active stream as complete and notifies stream subscribers. */
   private _markStreamDone(): void {
-    this._streamDone = true;
+    this._activeStreamId = undefined;
     this._notifySubscribers();
+  }
+
+  private _beginNewStream(): void {
+    const streamId =
+      this._events.length === 0 ? this._translationState.streamId : undefined;
+    this._translationState = createTranslationState(streamId);
+    this._abortController = new AbortController();
+    this._streamEndEmitted = false;
+    this._activeStreamId = this._translationState.streamId;
+    this._lastStartedStreamId = this._translationState.streamId;
   }
 
   private _appendAndNotify(events: AgentEvent[]): void {
@@ -384,6 +396,56 @@ export class LegacyAgentSession implements AgentSession {
   private _notifySubscribers(): void {
     for (const handler of this._subscribers) {
       handler();
+    }
+  }
+
+  private async _waitForUpdate(): Promise<void> {
+    await new Promise<void>((resolve) => {
+      const handler = (): void => {
+        this._subscribers.delete(handler);
+        resolve();
+      };
+      this._subscribers.add(handler);
+    });
+  }
+
+  private _hasSeenStream(streamId: string): boolean {
+    return (
+      this._activeStreamId === streamId ||
+      this._lastStartedStreamId === streamId ||
+      this._events.some((event) => event.streamId === streamId)
+    );
+  }
+
+  private async *_streamById(
+    streamId: string,
+    startIndex: number,
+  ): AsyncIterableIterator<AgentEvent> {
+    if (!this._hasSeenStream(streamId)) {
+      throw new Error(`Stream not found: ${streamId}`);
+    }
+
+    let replayedUpTo = startIndex;
+
+    while (true) {
+      while (replayedUpTo < this._events.length) {
+        const event = this._events[replayedUpTo];
+        replayedUpTo++;
+        if (!event || event.streamId !== streamId) {
+          continue;
+        }
+
+        yield event;
+        if (event.type === 'stream_end') {
+          return;
+        }
+      }
+
+      if (this._activeStreamId !== streamId) {
+        return;
+      }
+
+      await this._waitForUpdate();
     }
   }
 
@@ -411,8 +473,8 @@ export class LegacyAgentSession implements AgentSession {
   }
 
   /**
-   * Review fix #4: Preserves error metadata (name, exitCode, stack) in _meta
-   * so downstream consumers can reconstruct proper error types.
+   * Preserve error identity fields in _meta so downstream consumers can
+   * reconstruct fatal CLI errors.
    */
   private _emitErrorAndStreamEnd(err: unknown): void {
     const message = err instanceof Error ? err.message : String(err);

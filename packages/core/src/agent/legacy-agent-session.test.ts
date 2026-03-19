@@ -98,9 +98,21 @@ function makeCompletedToolCall(
 
 async function collectEvents(
   session: LegacyAgentSession,
+  options?: { streamId?: string; eventId?: string },
 ): Promise<AgentEvent[]> {
   const events: AgentEvent[] = [];
-  for await (const event of session.stream()) {
+  const latestStreamId =
+    options?.streamId ??
+    (options?.eventId
+      ? undefined
+      : session.events.findLast((event) => event.type === 'stream_start')
+          ?.streamId);
+  const streamOptions =
+    latestStreamId || options?.eventId
+      ? { ...options, ...(latestStreamId ? { streamId: latestStreamId } : {}) }
+      : options;
+
+  for await (const event of session.stream(streamOptions)) {
     events.push(event);
   }
   return events;
@@ -141,11 +153,127 @@ describe('LegacyAgentSession', () => {
       expect(result.streamId).toBe('test-stream');
     });
 
+    it('records the sent user message in the trajectory', async () => {
+      const sendMock = deps.client.sendMessageStream as ReturnType<
+        typeof vi.fn
+      >;
+      sendMock.mockReturnValue(
+        makeStream([
+          {
+            type: GeminiEventType.Finished,
+            value: { reason: FinishReason.STOP, usageMetadata: undefined },
+          },
+        ]),
+      );
+
+      const session = new LegacyAgentSession(deps);
+      const { streamId } = await session.send({
+        message: [{ type: 'text', text: 'hi' }],
+        _meta: { source: 'user-test' },
+      });
+      const events = await collectEvents(session, { streamId });
+
+      const userMessage = events.find(
+        (e): e is AgentEvent<'message'> =>
+          e.type === 'message' && e.role === 'user',
+      );
+      expect(userMessage?.content).toEqual([{ type: 'text', text: 'hi' }]);
+      expect(userMessage?._meta).toEqual({ source: 'user-test' });
+    });
+
     it('throws for non-message payloads', async () => {
       const session = new LegacyAgentSession(deps);
       await expect(session.send({ update: { title: 'test' } })).rejects.toThrow(
         'only supports message sends',
       );
+    });
+
+    it('throws if send is called while a stream is active', async () => {
+      let resolveHang: (() => void) | undefined;
+      const sendMock = deps.client.sendMessageStream as ReturnType<
+        typeof vi.fn
+      >;
+      sendMock.mockReturnValue(
+        (async function* () {
+          await new Promise<void>((resolve) => {
+            resolveHang = resolve;
+          });
+          yield {
+            type: GeminiEventType.Finished,
+            value: { reason: FinishReason.STOP, usageMetadata: undefined },
+          } as ServerGeminiStreamEvent;
+        })(),
+      );
+
+      const session = new LegacyAgentSession(deps);
+      await session.send({ message: [{ type: 'text', text: 'first' }] });
+
+      await expect(
+        session.send({ message: [{ type: 'text', text: 'second' }] }),
+      ).rejects.toThrow('cannot be called while a stream is active');
+
+      resolveHang?.();
+      await collectEvents(session);
+    });
+
+    it('creates a new streamId after the previous stream completes', async () => {
+      const sendMock = deps.client.sendMessageStream as ReturnType<
+        typeof vi.fn
+      >;
+      sendMock
+        .mockReturnValueOnce(
+          makeStream([
+            { type: GeminiEventType.Content, value: 'first response' },
+            {
+              type: GeminiEventType.Finished,
+              value: { reason: FinishReason.STOP, usageMetadata: undefined },
+            },
+          ]),
+        )
+        .mockReturnValueOnce(
+          makeStream([
+            { type: GeminiEventType.Content, value: 'second response' },
+            {
+              type: GeminiEventType.Finished,
+              value: { reason: FinishReason.STOP, usageMetadata: undefined },
+            },
+          ]),
+        );
+
+      const session = new LegacyAgentSession(deps);
+      const first = await session.send({
+        message: [{ type: 'text', text: 'first' }],
+      });
+      const firstEvents = await collectEvents(session, {
+        streamId: first.streamId,
+      });
+
+      const second = await session.send({
+        message: [{ type: 'text', text: 'second' }],
+      });
+      const secondEvents = await collectEvents(session, {
+        streamId: second.streamId,
+      });
+
+      expect(first.streamId).not.toBe(second.streamId);
+      expect(
+        firstEvents.some(
+          (e) =>
+            e.type === 'message' &&
+            e.role === 'user' &&
+            e.content[0]?.type === 'text' &&
+            e.content[0].text === 'first',
+        ),
+      ).toBe(true);
+      expect(
+        secondEvents.some(
+          (e) =>
+            e.type === 'message' &&
+            e.role === 'user' &&
+            e.content[0]?.type === 'text' &&
+            e.content[0].text === 'second',
+        ),
+      ).toBe(true);
     });
   });
 
@@ -626,6 +754,279 @@ describe('LegacyAgentSession', () => {
 
       expect(session.events.length).toBeGreaterThan(0);
       expect(session.events[0]?.type).toBe('stream_start');
+    });
+  });
+
+  describe('stream scoping', () => {
+    it('waits for the next stream when called while idle', async () => {
+      const sendMock = deps.client.sendMessageStream as ReturnType<
+        typeof vi.fn
+      >;
+      sendMock.mockReturnValue(
+        makeStream([
+          { type: GeminiEventType.Content, value: 'hello later' },
+          {
+            type: GeminiEventType.Finished,
+            value: { reason: FinishReason.STOP, usageMetadata: undefined },
+          },
+        ]),
+      );
+
+      const session = new LegacyAgentSession(deps);
+      const pendingEvents = (async () => {
+        const events: AgentEvent[] = [];
+        for await (const event of session.stream()) {
+          events.push(event);
+        }
+        return events;
+      })();
+
+      const { streamId } = await session.send({
+        message: [{ type: 'text', text: 'hi' }],
+      });
+      const events = await pendingEvents;
+
+      expect(events.length).toBeGreaterThan(0);
+      expect(events[0]?.type).toBe('stream_start');
+      expect(events.every((event) => event.streamId === streamId)).toBe(true);
+    });
+
+    it('waits for the next stream instead of replaying old history when idle', async () => {
+      const sendMock = deps.client.sendMessageStream as ReturnType<
+        typeof vi.fn
+      >;
+      sendMock
+        .mockReturnValueOnce(
+          makeStream([
+            { type: GeminiEventType.Content, value: 'first answer' },
+            {
+              type: GeminiEventType.Finished,
+              value: { reason: FinishReason.STOP, usageMetadata: undefined },
+            },
+          ]),
+        )
+        .mockReturnValueOnce(
+          makeStream([
+            { type: GeminiEventType.Content, value: 'second answer' },
+            {
+              type: GeminiEventType.Finished,
+              value: { reason: FinishReason.STOP, usageMetadata: undefined },
+            },
+          ]),
+        );
+
+      const session = new LegacyAgentSession(deps);
+      const first = await session.send({
+        message: [{ type: 'text', text: 'first request' }],
+      });
+      await collectEvents(session, { streamId: first.streamId });
+
+      const pendingEvents = (async () => {
+        const events: AgentEvent[] = [];
+        for await (const event of session.stream()) {
+          events.push(event);
+        }
+        return events;
+      })();
+
+      const second = await session.send({
+        message: [{ type: 'text', text: 'second request' }],
+      });
+      const events = await pendingEvents;
+
+      expect(events.length).toBeGreaterThan(0);
+      expect(events.every((event) => event.streamId === second.streamId)).toBe(
+        true,
+      );
+      expect(
+        events.some(
+          (event) =>
+            event.type === 'message' &&
+            event.role === 'user' &&
+            event.content[0]?.type === 'text' &&
+            event.content[0].text === 'first request',
+        ),
+      ).toBe(false);
+    });
+
+    it('streams only the requested streamId', async () => {
+      const sendMock = deps.client.sendMessageStream as ReturnType<
+        typeof vi.fn
+      >;
+      sendMock
+        .mockReturnValueOnce(
+          makeStream([
+            { type: GeminiEventType.Content, value: 'first answer' },
+            {
+              type: GeminiEventType.Finished,
+              value: { reason: FinishReason.STOP, usageMetadata: undefined },
+            },
+          ]),
+        )
+        .mockReturnValueOnce(
+          makeStream([
+            { type: GeminiEventType.Content, value: 'second answer' },
+            {
+              type: GeminiEventType.Finished,
+              value: { reason: FinishReason.STOP, usageMetadata: undefined },
+            },
+          ]),
+        );
+
+      const session = new LegacyAgentSession(deps);
+      const first = await session.send({
+        message: [{ type: 'text', text: 'first request' }],
+      });
+      await collectEvents(session, { streamId: first.streamId });
+
+      const second = await session.send({
+        message: [{ type: 'text', text: 'second request' }],
+      });
+      await collectEvents(session, { streamId: second.streamId });
+
+      const firstStreamEvents = await collectEvents(session, {
+        streamId: first.streamId,
+      });
+
+      expect(firstStreamEvents.every((event) => event.streamId === first.streamId)).toBe(
+        true,
+      );
+      expect(
+        firstStreamEvents.some(
+          (e) =>
+            e.type === 'message' &&
+            e.role === 'user' &&
+            e.content[0]?.type === 'text' &&
+            e.content[0].text === 'first request',
+        ),
+      ).toBe(true);
+      expect(
+        firstStreamEvents.some(
+          (e) =>
+            e.type === 'message' &&
+            e.role === 'user' &&
+            e.content[0]?.type === 'text' &&
+            e.content[0].text === 'second request',
+        ),
+      ).toBe(false);
+    });
+
+    it('resumes from eventId within the same stream only', async () => {
+      const sendMock = deps.client.sendMessageStream as ReturnType<
+        typeof vi.fn
+      >;
+      sendMock
+        .mockReturnValueOnce(
+          makeStream([
+            { type: GeminiEventType.Content, value: 'first answer' },
+            {
+              type: GeminiEventType.Finished,
+              value: { reason: FinishReason.STOP, usageMetadata: undefined },
+            },
+          ]),
+        )
+        .mockReturnValueOnce(
+          makeStream([
+            { type: GeminiEventType.Content, value: 'second answer' },
+            {
+              type: GeminiEventType.Finished,
+              value: { reason: FinishReason.STOP, usageMetadata: undefined },
+            },
+          ]),
+        );
+
+      const session = new LegacyAgentSession(deps);
+      const first = await session.send({
+        message: [{ type: 'text', text: 'first request' }],
+      });
+      const firstEvents = await collectEvents(session, { streamId: first.streamId });
+
+      await session.send({
+        message: [{ type: 'text', text: 'second request' }],
+      });
+      await collectEvents(session);
+
+      const firstUserMessage = firstEvents.find(
+        (e): e is AgentEvent<'message'> =>
+          e.type === 'message' && e.role === 'user',
+      );
+      expect(firstUserMessage).toBeDefined();
+
+      const resumedEvents = await collectEvents(session, {
+        eventId: firstUserMessage?.id,
+      });
+      expect(resumedEvents.every((event) => event.streamId === first.streamId)).toBe(
+        true,
+      );
+      expect(
+        resumedEvents.some(
+          (e) =>
+            e.type === 'message' &&
+            e.role === 'agent' &&
+            e.content[0]?.type === 'text' &&
+            e.content[0].text === 'first answer',
+        ),
+      ).toBe(true);
+      expect(
+        resumedEvents.some(
+          (e) =>
+            e.type === 'message' &&
+            e.role === 'agent' &&
+            e.content[0]?.type === 'text' &&
+            e.content[0].text === 'second answer',
+        ),
+      ).toBe(false);
+    });
+
+    it('throws if eventId and streamId point at different streams', async () => {
+      const sendMock = deps.client.sendMessageStream as ReturnType<
+        typeof vi.fn
+      >;
+      sendMock
+        .mockReturnValueOnce(
+          makeStream([
+            { type: GeminiEventType.Content, value: 'first answer' },
+            {
+              type: GeminiEventType.Finished,
+              value: { reason: FinishReason.STOP, usageMetadata: undefined },
+            },
+          ]),
+        )
+        .mockReturnValueOnce(
+          makeStream([
+            { type: GeminiEventType.Content, value: 'second answer' },
+            {
+              type: GeminiEventType.Finished,
+              value: { reason: FinishReason.STOP, usageMetadata: undefined },
+            },
+          ]),
+        );
+
+      const session = new LegacyAgentSession(deps);
+      const first = await session.send({
+        message: [{ type: 'text', text: 'first request' }],
+      });
+      const firstEvents = await collectEvents(session, { streamId: first.streamId });
+
+      const second = await session.send({
+        message: [{ type: 'text', text: 'second request' }],
+      });
+      await collectEvents(session, { streamId: second.streamId });
+
+      const firstUserMessage = firstEvents.find(
+        (event): event is AgentEvent<'message'> =>
+          event.type === 'message' && event.role === 'user',
+      );
+      expect(firstUserMessage).toBeDefined();
+
+      await expect(
+        collectEvents(session, {
+          streamId: second.streamId,
+          eventId: firstUserMessage?.id,
+        }),
+      ).rejects.toThrow(
+        `Event ${firstUserMessage?.id} does not belong to stream ${second.streamId}`,
+      );
     });
   });
 
