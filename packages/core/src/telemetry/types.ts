@@ -44,6 +44,7 @@ import { getFileDiffFromResultDisplay } from '../utils/fileDiffUtils.js';
 import { LlmRole } from './llmRole.js';
 export { LlmRole };
 import type { HookType } from '../hooks/types.js';
+import type { UserTierId } from '../code_assist/types.js';
 
 export interface BaseTelemetryEvent {
   'event.name': string;
@@ -2376,7 +2377,7 @@ export class OnboardingStartEvent implements BaseTelemetryEvent {
   }
 
   toLogBody(): string {
-    return 'Google auth started.';
+    return 'Onboarding started.';
   }
 }
 
@@ -2384,10 +2385,12 @@ export const EVENT_ONBOARDING_SUCCESS = 'gemini_cli.onboarding.success';
 export class OnboardingSuccessEvent implements BaseTelemetryEvent {
   'event.name': 'onboarding_success';
   'event.timestamp': string;
+  userTier?: UserTierId;
 
-  constructor() {
+  constructor(userTier?: UserTierId) {
     this['event.name'] = 'onboarding_success';
     this['event.timestamp'] = new Date().toISOString();
+    this.userTier = userTier;
   }
 
   toOpenTelemetryAttributes(config: Config): LogAttributes {
@@ -2395,11 +2398,12 @@ export class OnboardingSuccessEvent implements BaseTelemetryEvent {
       ...getCommonAttributes(config),
       'event.name': EVENT_ONBOARDING_SUCCESS,
       'event.timestamp': this['event.timestamp'],
+      user_tier: this.userTier ?? '',
     };
   }
 
   toLogBody(): string {
-    return 'Google auth succeeded.';
+    return `Onboarding succeeded.${this.userTier ? ` Tier: ${this.userTier}` : ''}`;
   }
 }
 
