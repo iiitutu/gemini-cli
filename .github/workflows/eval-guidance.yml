@@ -1,0 +1,56 @@
+name: 'Evals: PR Guidance'
+
+on:
+  pull_request:
+    paths:
+      - 'packages/core/src/prompts/**'
+      - 'packages/core/src/tools/**'
+      - 'packages/core/src/agents/**'
+
+permissions:
+  pull-requests: 'write'
+  contents: 'read'
+
+jobs:
+  provide-guidance:
+    name: 'Model Steering Guidance'
+    runs-on: 'ubuntu-latest'
+    if: "github.repository == 'google-gemini/gemini-cli'"
+    steps:
+      - name: 'Checkout'
+        uses: 'actions/checkout@v4'
+        with:
+          fetch-depth: 0
+
+      - name: 'Analyze PR Content'
+        id: 'analysis'
+        env:
+          GH_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
+        run: |
+          # 1. Check for behavioral eval changes
+          # We compare against the base branch of the PR
+          EVAL_CHANGES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep "^evals/" || true)
+          if [ -z "$EVAL_CHANGES" ]; then
+            echo "MISSING_EVALS=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          # 2. Check if user is a maintainer (has write/admin access)
+          USER_PERMISSION=$(gh api repos/${{ github.repository }}/collaborators/${{ github.actor }}/permission --jq '.permission')
+          if [[ "$USER_PERMISSION" == "admin" || "$USER_PERMISSION" == "write" ]]; then
+            echo "IS_MAINTAINER=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 'Post Guidance Comment'
+        uses: 'thollander/actions-comment-pull-request@v2'
+        with:
+          comment_tag: 'eval-guidance-bot'
+          message: |
+            ### 🧠 Model Steering Guidance
+            
+            This PR modifies files that affect the model's behavior (prompts, tools, or instructions).
+            
+            ${{ steps.analysis.outputs.MISSING_EVALS == 'true' && '- ⚠️ **Consider adding Evals:** No behavioral evaluations (`evals/*.eval.ts`) were added or updated in this PR. Consider adding a test case to verify the new behavior and prevent regressions.' || '' }}
+            ${{ steps.analysis.outputs.IS_MAINTAINER == 'true' && '- 🚀 **Maintainer Reminder:** Please ensure that these changes do not regress results on **SWE-bench** or **Terminal Bench** before merging.' || '' }}
+            
+            ---
+            *This is an automated guidance message based on the files changed in your PR.*
