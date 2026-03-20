@@ -62,10 +62,8 @@ You tell Gemini about new servers by editing your `settings.json`.
 }
 ```
 
-<!-- prettier-ignore -->
-> [!NOTE]
-> The `command` is `docker`, and the rest are arguments passed to it. We
-> map the local environment variable into the container so your secret isn't
+> **Note:** The `command` is `docker`, and the rest are arguments passed to it.
+> We map the local environment variable into the container so your secret isn't
 > hardcoded in the config file.
 
 ## How to verify the connection

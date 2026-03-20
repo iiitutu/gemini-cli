@@ -100,10 +100,7 @@ const listPoliciesCommand: SlashCommand = {
       'Yolo Mode Policies (combined with normal mode policies)',
       uniqueYolo,
     );
-    content += formatSection(
-      'Plan Mode Policies (combined with normal mode policies)',
-      uniquePlan,
-    );
+    content += formatSection('Plan Mode Policies', uniquePlan);
 
     context.ui.addItem(
       {

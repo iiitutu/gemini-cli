@@ -3,11 +3,18 @@
  * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
+import { makeFakeConfig } from '@google/gemini-cli-core';
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
 import {
   renderWithProviders,
   persistentStateMock,
 } from '../../test-utils/render.js';
+import type { LoadedSettings } from '../../config/settings.js';
 import { AppHeader } from './AppHeader.js';
 import { describe, it, expect, vi } from 'vitest';
 import crypto from 'node:crypto';
@@ -27,17 +34,14 @@ describe('<AppHeader />', () => {
       bannerVisible: true,
     };
 
-    const { lastFrame, waitUntilReady, unmount } = await renderWithProviders(
-      <AppHeader version="1.0.0" />,
-      {
-        uiState,
-      },
-    );
-    await waitUntilReady();
+    const result = await renderWithProviders(<AppHeader version="1.0.0" />, {
+      uiState,
+    });
+    await result.waitUntilReady();
 
-    expect(lastFrame()).toContain('This is the default banner');
-    expect(lastFrame()).toMatchSnapshot();
-    unmount();
+    expect(result.lastFrame()).toContain('This is the default banner');
+    expect(result.lastFrame()).toMatchSnapshot();
+    result.unmount();
   });
 
   it('should render the banner with warning text', async () => {
@@ -50,17 +54,14 @@ describe('<AppHeader />', () => {
       bannerVisible: true,
     };
 
-    const { lastFrame, waitUntilReady, unmount } = await renderWithProviders(
-      <AppHeader version="1.0.0" />,
-      {
-        uiState,
-      },
-    );
-    await waitUntilReady();
+    const result = await renderWithProviders(<AppHeader version="1.0.0" />, {
+      uiState,
+    });
+    await result.waitUntilReady();
 
-    expect(lastFrame()).toContain('There are capacity issues');
-    expect(lastFrame()).toMatchSnapshot();
-    unmount();
+    expect(result.lastFrame()).toContain('There are capacity issues');
+    expect(result.lastFrame()).toMatchSnapshot();
+    result.unmount();
   });
 
   it('should not render the banner when no flags are set', async () => {
@@ -72,17 +73,14 @@ describe('<AppHeader />', () => {
       },
     };
 
-    const { lastFrame, waitUntilReady, unmount } = await renderWithProviders(
-      <AppHeader version="1.0.0" />,
-      {
-        uiState,
-      },
-    );
-    await waitUntilReady();
+    const result = await renderWithProviders(<AppHeader version="1.0.0" />, {
+      uiState,
+    });
+    await result.waitUntilReady();
 
-    expect(lastFrame()).not.toContain('Banner');
-    expect(lastFrame()).toMatchSnapshot();
-    unmount();
+    expect(result.lastFrame()).not.toContain('Banner');
+    expect(result.lastFrame()).toMatchSnapshot();
+    result.unmount();
   });
 
   it('should not render the default banner if shown count is 5 or more', async () => {
@@ -103,17 +101,14 @@ describe('<AppHeader />', () => {
       },
     });
 
-    const { lastFrame, waitUntilReady, unmount } = await renderWithProviders(
-      <AppHeader version="1.0.0" />,
-      {
-        uiState,
-      },
-    );
-    await waitUntilReady();
+    const result = await renderWithProviders(<AppHeader version="1.0.0" />, {
+      uiState,
+    });
+    await result.waitUntilReady();
 
-    expect(lastFrame()).not.toContain('This is the default banner');
-    expect(lastFrame()).toMatchSnapshot();
-    unmount();
+    expect(result.lastFrame()).not.toContain('This is the default banner');
+    expect(result.lastFrame()).toMatchSnapshot();
+    result.unmount();
   });
 
   it('should increment the version count when default banner is displayed', async () => {
@@ -129,13 +124,10 @@ describe('<AppHeader />', () => {
     // and interfering with the expected persistentState.set call.
     persistentStateMock.setData({ tipsShown: 10 });
 
-    const { waitUntilReady, unmount } = await renderWithProviders(
-      <AppHeader version="1.0.0" />,
-      {
-        uiState,
-      },
-    );
-    await waitUntilReady();
+    const result = await renderWithProviders(<AppHeader version="1.0.0" />, {
+      uiState,
+    });
+    await result.waitUntilReady();
 
     expect(persistentStateMock.set).toHaveBeenCalledWith(
       'defaultBannerShownCount',
@@ -146,7 +138,7 @@ describe('<AppHeader />', () => {
           .digest('hex')]: 1,
       },
     );
-    unmount();
+    result.unmount();
   });
 
   it('should render banner text with unescaped newlines', async () => {
@@ -159,16 +151,13 @@ describe('<AppHeader />', () => {
       bannerVisible: true,
     };
 
-    const { lastFrame, waitUntilReady, unmount } = await renderWithProviders(
-      <AppHeader version="1.0.0" />,
-      {
-        uiState,
-      },
-    );
-    await waitUntilReady();
+    const result = await renderWithProviders(<AppHeader version="1.0.0" />, {
+      uiState,
+    });
+    await result.waitUntilReady();
 
-    expect(lastFrame()).not.toContain('First line\\nSecond line');
-    unmount();
+    expect(result.lastFrame()).not.toContain('First line\\nSecond line');
+    result.unmount();
   });
 
   it('should render Tips when tipsShown is less than 10', async () => {
@@ -183,17 +172,14 @@ describe('<AppHeader />', () => {
 
     persistentStateMock.setData({ tipsShown: 5 });
 
-    const { lastFrame, waitUntilReady, unmount } = await renderWithProviders(
-      <AppHeader version="1.0.0" />,
-      {
-        uiState,
-      },
-    );
-    await waitUntilReady();
+    const result = await renderWithProviders(<AppHeader version="1.0.0" />, {
+      uiState,
+    });
+    await result.waitUntilReady();
 
-    expect(lastFrame()).toContain('Tips');
+    expect(result.lastFrame()).toContain('Tips');
     expect(persistentStateMock.set).toHaveBeenCalledWith('tipsShown', 6);
-    unmount();
+    result.unmount();
   });
 
   it('should NOT render Tips when tipsShown is 10 or more', async () => {
@@ -206,16 +192,13 @@ describe('<AppHeader />', () => {
 
     persistentStateMock.setData({ tipsShown: 10 });
 
-    const { lastFrame, waitUntilReady, unmount } = await renderWithProviders(
-      <AppHeader version="1.0.0" />,
-      {
-        uiState,
-      },
-    );
-    await waitUntilReady();
+    const result = await renderWithProviders(<AppHeader version="1.0.0" />, {
+      uiState,
+    });
+    await result.waitUntilReady();
 
-    expect(lastFrame()).not.toContain('Tips');
-    unmount();
+    expect(result.lastFrame()).not.toContain('Tips');
+    result.unmount();
   });
 
   it('should show tips until they have been shown 10 times (persistence flow)', async () => {
@@ -249,5 +232,21 @@ describe('<AppHeader />', () => {
 
     expect(session2.lastFrame()).not.toContain('Tips');
     session2.unmount();
+  });
+
+  it('should NOT render Tips when ui.hideTips is true', async () => {
+    const mockConfig = makeFakeConfig();
+    const result = await renderWithProviders(<AppHeader version="1.0.0" />, {
+      config: mockConfig,
+      settings: {
+        merged: {
+          ui: { hideTips: true },
+        },
+      } as unknown as LoadedSettings,
+    });
+    await result.waitUntilReady();
+
+    expect(result.lastFrame()).not.toContain('Tips');
+    result.unmount();
   });
 });
