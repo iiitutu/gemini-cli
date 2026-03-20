@@ -22,16 +22,8 @@ describe('LinuxSandboxManager', () => {
 
     const result = await manager.prepareCommand(req);
 
-    expect(result.program).toBe('sh');
-    expect(result.args[0]).toBe('-c');
-    expect(result.args[1]).toBe(
-      'bpf_path="$1"; shift; exec bwrap "$@" 9< "$bpf_path"',
-    );
-    expect(result.args[2]).toBe('_');
-    expect(result.args[3]).toMatch(/gemini-cli-seccomp-.*\.bpf$/);
-
-    const bwrapArgs = result.args.slice(4);
-    expect(bwrapArgs).toEqual([
+    expect(result.program).toBe('bwrap');
+    expect(result.args).toEqual([
       '--unshare-all',
       '--new-session',
       '--die-with-parent',
@@ -47,8 +39,6 @@ describe('LinuxSandboxManager', () => {
       '--bind',
       workspace,
       workspace,
-      '--seccomp',
-      '9',
       '--',
       'ls',
       '-la',
@@ -69,16 +59,8 @@ describe('LinuxSandboxManager', () => {
 
     const result = await manager.prepareCommand(req);
 
-    expect(result.program).toBe('sh');
-    expect(result.args[0]).toBe('-c');
-    expect(result.args[1]).toBe(
-      'bpf_path="$1"; shift; exec bwrap "$@" 9< "$bpf_path"',
-    );
-    expect(result.args[2]).toBe('_');
-    expect(result.args[3]).toMatch(/gemini-cli-seccomp-.*\.bpf$/);
-
-    const bwrapArgs = result.args.slice(4);
-    expect(bwrapArgs).toEqual([
+    expect(result.program).toBe('bwrap');
+    expect(result.args).toEqual([
       '--unshare-all',
       '--new-session',
       '--die-with-parent',
@@ -100,8 +82,6 @@ describe('LinuxSandboxManager', () => {
       '--bind',
       '/opt/tools',
       '/opt/tools',
-      '--seccomp',
-      '9',
       '--',
       'node',
       'script.js',

@@ -244,11 +244,10 @@ export async function parseArguments(
             // When --resume passed without a value (`gemini --resume`): value = "" (string)
             // When --resume not passed at all: this `coerce` function is not called at all, and
             //   `yargsInstance.argv.resume` is undefined.
-            const trimmed = value.trim();
-            if (trimmed === '') {
+            if (value === '') {
               return RESUME_LATEST;
             }
-            return trimmed;
+            return value;
           },
         })
         .option('list-sessions', {
@@ -651,12 +650,8 @@ export async function loadCliConfig(
       ...settings.mcp,
       allowed: argv.allowedMcpServerNames ?? settings.mcp?.allowed,
     },
-    policyPaths: (argv.policy ?? settings.policyPaths)?.map((p) =>
-      resolvePath(p),
-    ),
-    adminPolicyPaths: (argv.adminPolicy ?? settings.adminPolicyPaths)?.map(
-      (p) => resolvePath(p),
-    ),
+    policyPaths: argv.policy ?? settings.policyPaths,
+    adminPolicyPaths: argv.adminPolicy ?? settings.adminPolicyPaths,
   };
 
   const { workspacePoliciesDir, policyUpdateConfirmationRequest } =

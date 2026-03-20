@@ -57,14 +57,10 @@ export class SessionError extends Error {
   /**
    * Creates an error for when a session identifier is invalid.
    */
-  static invalidSessionIdentifier(
-    identifier: string,
-    chatsDir?: string,
-  ): SessionError {
-    const dirInfo = chatsDir ? ` in ${chatsDir}` : '';
+  static invalidSessionIdentifier(identifier: string): SessionError {
     return new SessionError(
       'INVALID_SESSION_IDENTIFIER',
-      `Invalid session identifier "${identifier}".\n  Searched for sessions${dirInfo}.\n  Use --list-sessions to see available sessions, then use --resume {number}, --resume {uuid}, or --resume latest.`,
+      `Invalid session identifier "${identifier}".\n  Use --list-sessions to see available sessions, then use --resume {number}, --resume {uuid}, or --resume latest.`,
     );
   }
 }
@@ -420,7 +416,6 @@ export class SessionSelector {
    * @throws Error if the session is not found or identifier is invalid
    */
   async findSession(identifier: string): Promise<SessionInfo> {
-    const trimmedIdentifier = identifier.trim();
     const sessions = await this.listSessions();
 
     if (sessions.length === 0) {
@@ -435,28 +430,24 @@ export class SessionSelector {
 
     // Try to find by UUID first
     const sessionByUuid = sortedSessions.find(
-      (session) => session.id === trimmedIdentifier,
+      (session) => session.id === identifier,
     );
     if (sessionByUuid) {
       return sessionByUuid;
     }
 
     // Parse as index number (1-based) - only allow numeric indexes
-    const index = parseInt(trimmedIdentifier, 10);
+    const index = parseInt(identifier, 10);
     if (
       !isNaN(index) &&
-      index.toString() === trimmedIdentifier &&
+      index.toString() === identifier &&
       index > 0 &&
       index <= sortedSessions.length
     ) {
       return sortedSessions[index - 1];
     }
 
-    const chatsDir = path.join(
-      this.config.storage.getProjectTempDir(),
-      'chats',
-    );
-    throw SessionError.invalidSessionIdentifier(trimmedIdentifier, chatsDir);
+    throw SessionError.invalidSessionIdentifier(identifier);
   }
 
   /**
@@ -467,9 +458,8 @@ export class SessionSelector {
    */
   async resolveSession(resumeArg: string): Promise<SessionSelectionResult> {
     let selectedSession: SessionInfo;
-    const trimmedResumeArg = resumeArg.trim();
 
-    if (trimmedResumeArg === RESUME_LATEST) {
+    if (resumeArg === RESUME_LATEST) {
       const sessions = await this.listSessions();
 
       if (sessions.length === 0) {
@@ -485,7 +475,7 @@ export class SessionSelector {
       selectedSession = sessions[sessions.length - 1];
     } else {
       try {
-        selectedSession = await this.findSession(trimmedResumeArg);
+        selectedSession = await this.findSession(resumeArg);
       } catch (error) {
         // SessionError already has detailed messages - just rethrow
         if (error instanceof SessionError) {
@@ -493,7 +483,7 @@ export class SessionSelector {
         }
         // Wrap unexpected errors with context
         throw new Error(
-          `Failed to find session "${trimmedResumeArg}": ${error instanceof Error ? error.message : String(error)}`,
+          `Failed to find session "${resumeArg}": ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     }

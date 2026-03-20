@@ -4,13 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export interface ModelResolutionContext {
-  useGemini3_1?: boolean;
-  useCustomTools?: boolean;
-  hasAccessToPreview?: boolean;
-  requestedModel?: string;
-}
-
 /**
  * Interface for the ModelConfigService to break circular dependencies.
  */
@@ -27,17 +20,6 @@ export interface IModelConfigService {
         };
       }
     | undefined;
-
-  resolveModelId(
-    requestedModel: string,
-    context?: ModelResolutionContext,
-  ): string;
-
-  resolveClassifierModelId(
-    tier: string,
-    requestedModel: string,
-    context?: ModelResolutionContext,
-  ): string;
 }
 
 /**
@@ -99,16 +81,7 @@ export function resolveModel(
   useGemini3_1: boolean = false,
   useCustomToolModel: boolean = false,
   hasAccessToPreview: boolean = true,
-  config?: ModelCapabilityContext,
 ): string {
-  if (config?.getExperimentalDynamicModelConfiguration?.() === true) {
-    return config.modelConfigService.resolveModelId(requestedModel, {
-      useGemini3_1,
-      useCustomTools: useCustomToolModel,
-      hasAccessToPreview,
-    });
-  }
-
   let resolved: string;
   switch (requestedModel) {
     case PREVIEW_GEMINI_MODEL:
@@ -171,9 +144,6 @@ export function resolveModel(
  *
  * @param requestedModel The current requested model (e.g. auto-gemini-2.5).
  * @param modelAlias The alias selected by the classifier ('flash' or 'pro').
- * @param useGemini3_1 Whether to use Gemini 3.1 Pro Preview.
- * @param useCustomToolModel Whether to use the custom tool model.
- * @param config Optional config object for dynamic model configuration.
  * @returns The resolved concrete model name.
  */
 export function resolveClassifierModel(
@@ -181,21 +151,7 @@ export function resolveClassifierModel(
   modelAlias: string,
   useGemini3_1: boolean = false,
   useCustomToolModel: boolean = false,
-  hasAccessToPreview: boolean = true,
-  config?: ModelCapabilityContext,
 ): string {
-  if (config?.getExperimentalDynamicModelConfiguration?.() === true) {
-    return config.modelConfigService.resolveClassifierModelId(
-      modelAlias,
-      requestedModel,
-      {
-        useGemini3_1,
-        useCustomTools: useCustomToolModel,
-        hasAccessToPreview,
-      },
-    );
-  }
-
   if (modelAlias === GEMINI_MODEL_ALIAS_FLASH) {
     if (
       requestedModel === DEFAULT_GEMINI_MODEL_AUTO ||
@@ -213,7 +169,6 @@ export function resolveClassifierModel(
   }
   return resolveModel(requestedModel, useGemini3_1, useCustomToolModel);
 }
-
 export function getDisplayString(
   model: string,
   config?: ModelCapabilityContext,
@@ -334,7 +289,7 @@ export function isCustomModel(
   config?: ModelCapabilityContext,
 ): boolean {
   if (config?.getExperimentalDynamicModelConfiguration?.() === true) {
-    const resolved = resolveModel(model, false, false, true, config);
+    const resolved = resolveModel(model);
     return (
       config.modelConfigService.getModelDefinition(resolved)?.tier ===
         'custom' || !resolved.startsWith('gemini-')

@@ -570,19 +570,6 @@ export class AgentRegistry {
       },
     };
 
-    if (overrides.tools) {
-      merged.toolConfig = {
-        tools: overrides.tools,
-      };
-    }
-
-    if (overrides.mcpServers) {
-      merged.mcpServers = {
-        ...definition.mcpServers,
-        ...overrides.mcpServers,
-      };
-    }
-
     return merged;
   }
 

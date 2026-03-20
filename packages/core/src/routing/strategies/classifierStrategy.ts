@@ -180,8 +180,6 @@ export class ClassifierStrategy implements RoutingStrategy {
         routerResponse.model_choice,
         useGemini3_1,
         useCustomToolModel,
-        config.getHasAccessToPreviewModel?.() ?? true,
-        config,
       );
 
       return {
